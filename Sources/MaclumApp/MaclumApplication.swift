@@ -23,6 +23,7 @@ struct MaclumApplication: App {
     }
 }
 
+@MainActor
 private enum MaclumStatusIcon {
     static let image: NSImage = {
         let image = NSImage(size: NSSize(width: 22, height: 18))
