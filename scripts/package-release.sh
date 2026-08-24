@@ -33,7 +33,10 @@ if unzip -Z1 "$ARCHIVE" | grep -q '^__MACOSX/\|/\.DS_Store$'; then
   exit 1
 fi
 
-shasum -a 256 "$ARCHIVE" > "$CHECKSUM"
+(
+  cd "$OUTPUT_DIRECTORY"
+  shasum -a 256 "$(basename "$ARCHIVE")" > "$(basename "$CHECKSUM")"
+)
 
 echo "$ARCHIVE"
 echo "$CHECKSUM"

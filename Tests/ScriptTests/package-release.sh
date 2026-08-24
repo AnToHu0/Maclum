@@ -20,10 +20,15 @@ touch "$APP_BUNDLE/.DS_Store"
 
 ARCHIVE="$OUTPUT_DIRECTORY/Maclum-macos-apple-silicon.zip"
 CHECKSUM="$ARCHIVE.sha256"
+DOWNLOAD_DIRECTORY="$WORKSPACE/download"
 
 test -f "$ARCHIVE"
 test -f "$CHECKSUM"
-shasum -a 256 -c "$CHECKSUM"
+mkdir -p "$DOWNLOAD_DIRECTORY"
+mv "$ARCHIVE" "$CHECKSUM" "$DOWNLOAD_DIRECTORY"
+ARCHIVE="$DOWNLOAD_DIRECTORY/Maclum-macos-apple-silicon.zip"
+CHECKSUM="$ARCHIVE.sha256"
+(cd "$DOWNLOAD_DIRECTORY" && shasum -a 256 -c "$(basename "$CHECKSUM")")
 unzip -Z1 "$ARCHIVE" | grep -q '^Maclum.app/Contents/MacOS/Maclum$'
 if unzip -Z1 "$ARCHIVE" | grep -q '^__MACOSX/'; then
     echo "Release archive contains Finder metadata." >&2
