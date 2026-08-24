@@ -1,0 +1,36 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check repository boundaries
+        run: |
+          test -z "$(git ls-files -ci --exclude-standard)"
+          if git ls-files | grep -E '^(\.build|tmp)/|(^|/)\.DS_Store$|(^|/)LocalSigning\.'; then
+            echo "Tracked build output, local development artifacts, Finder metadata, or signing files detected." >&2
+            exit 1
+          fi
+      - name: Check scripts
+        run: |
+          zsh -n scripts/*.sh
+          zsh -n Tests/ScriptTests/*.sh
+      - name: Run contract tests
+        run: ./scripts/test.sh
+      - name: Run release-script tests
+        run: |
+          zsh Tests/ScriptTests/build-app-release.sh
+          ./scripts/verify-app-bundle.sh
+          zsh Tests/ScriptTests/package-release.sh
+          zsh Tests/ScriptTests/release-workflow.sh
