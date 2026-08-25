@@ -14,9 +14,11 @@ public struct DisplayProfile: Codable, Equatable, Identifiable, Sendable {
 
 public struct MaclumSettings: Codable, Equatable, Sendable {
     public private(set) var profiles: [DisplayProfile]
+	public var theme: ThemeSettings
 
-    public init(profiles: [DisplayProfile] = []) {
+	public init(profiles: [DisplayProfile] = [], theme: ThemeSettings = .default) {
         self.profiles = Self.uniqueProfiles(from: profiles)
+		self.theme = theme
     }
 
     public static let `default` = MaclumSettings()
@@ -63,28 +65,35 @@ public struct MaclumSettings: Codable, Equatable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
+		let theme = try container.decodeIfPresent(ThemeSettings.self, forKey: .theme) ?? .default
+
         if let profiles = try container.decodeIfPresent([DisplayProfile].self, forKey: .profiles) {
-            self.init(profiles: profiles)
+			self.init(profiles: profiles, theme: theme)
             return
         }
 
         guard container.contains(.curve) else {
-            self.init()
+			self.init(theme: theme)
             return
         }
 
         let curve = try container.decode(BrightnessCurve.self, forKey: .curve)
         let displayID = try container.decodeIfPresent(String.self, forKey: .selectedDisplayID)
-        self.init(profiles: displayID.map { [DisplayProfile(id: $0, name: "External Display", curve: curve)] } ?? [])
+		self.init(
+			profiles: displayID.map { [DisplayProfile(id: $0, name: "External Display", curve: curve)] } ?? [],
+			theme: theme
+		)
     }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(profiles, forKey: .profiles)
+		try container.encode(theme, forKey: .theme)
     }
 
     private enum CodingKeys: String, CodingKey {
         case profiles
+		case theme
         case curve
         case selectedDisplayID
     }

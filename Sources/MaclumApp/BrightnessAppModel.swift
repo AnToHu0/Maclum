@@ -25,15 +25,19 @@ final class BrightnessAppModel: ObservableObject {
     @Published private(set) var displays: [DDCDisplay] = []
     @Published private(set) var sourceBrightness: Double?
     @Published private(set) var displayBrightnesses: [String: Int] = [:]
+	@Published private(set) var currentTheme: SystemTheme = .light
     @Published private(set) var status: Status = .idle
 
     private let displayReader: any BuiltInBrightnessReading
     private let ddcClient: any DDCControlling
     private lazy var synchronizer = BrightnessSynchronizer(client: ddcClient)
     private let settingsStore: SettingsStore
+	private let appearanceController: any SystemAppearanceControlling
     private var pollingTimer: Timer?
     private var previewTarget: PreviewTarget?
     private var settingsWarning: String?
+	private var appearanceWarning: String?
+	private var shortcutWarning: String?
     private var lastDisplayBrightnessRefresh: Date?
     private var unavailableDisplayIDs: Set<String> = []
 
@@ -44,18 +48,21 @@ final class BrightnessAppModel: ObservableObject {
         self.init(
             displayReader: DisplayServicesBrightnessReader(),
             ddcClient: M1DDCClient(),
-            settingsStore: SettingsStore(fileURL: applicationSupport.appending(path: "Maclum/settings.json"))
+			settingsStore: SettingsStore(fileURL: applicationSupport.appending(path: "Maclum/settings.json")),
+			appearanceController: SystemEventsAppearanceController()
         )
     }
 
     init(
         displayReader: any BuiltInBrightnessReading,
         ddcClient: any DDCControlling,
-        settingsStore: SettingsStore
+		settingsStore: SettingsStore,
+		appearanceController: any SystemAppearanceControlling = SystemEventsAppearanceController()
     ) {
         self.displayReader = displayReader
         self.ddcClient = ddcClient
         self.settingsStore = settingsStore
+		self.appearanceController = appearanceController
     }
 
     var m1ddcIsInstalled: Bool { ddcClient.isInstalled }
@@ -63,9 +70,15 @@ final class BrightnessAppModel: ObservableObject {
     var inactiveProfiles: [DisplayProfile] {
         settings.inactiveProfiles(for: displays).filter { !unavailableDisplayIDs.contains($0.id) }
     }
+	var manualThemeShortcut: ThemeShortcut? { settings.theme.manualToggleShortcut }
+	var resumeAutomaticThemeShortcut: ThemeShortcut? { settings.theme.resumeAutomaticShortcut }
+	var automaticThemeThreshold: Int { settings.theme.automaticThreshold }
+	var isAutomaticThemeSwitchingEnabled: Bool { settings.theme.isAutomaticSwitchingEnabled }
+	var onThemeShortcutsChanged: (() -> Void)?
 
     func start() {
         loadSettings()
+		refreshCurrentTheme()
         refreshDisplays()
         synchronizeFromBuiltInDisplay()
         pollingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -146,12 +159,84 @@ final class BrightnessAppModel: ObservableObject {
         showIdleStatus()
     }
 
+	func setTheme(_ theme: SystemTheme) {
+		do {
+			try appearanceController.setTheme(theme)
+			currentTheme = theme
+			appearanceWarning = nil
+			setAutomaticThemeSwitchingEnabled(false)
+			showIdleStatus()
+		} catch {
+			setAppearanceWarning(error)
+		}
+	}
+
+	func toggleTheme() {
+		do {
+			currentTheme = try appearanceController.currentTheme()
+			setTheme(currentTheme.toggled)
+		} catch {
+			setAppearanceWarning(error)
+		}
+	}
+
+	func performThemeShortcut(_ action: ThemeShortcutAction) {
+		switch action {
+		case .manualToggle:
+			toggleTheme()
+		case .resumeAutomatic:
+			resumeAutomaticTheme()
+		}
+	}
+
+	func resumeAutomaticTheme() {
+		setAutomaticThemeSwitchingEnabled(true)
+		synchronizeTheme(using: sourceBrightness)
+	}
+
+	func setAutomaticThemeSwitchingEnabled(_ isEnabled: Bool) {
+		guard settings.theme.isAutomaticSwitchingEnabled != isEnabled else { return }
+		settings.theme.isAutomaticSwitchingEnabled = isEnabled
+		persistSettings()
+		onThemeShortcutsChanged?()
+		if isEnabled {
+			synchronizeTheme(using: sourceBrightness)
+		}
+		showIdleStatus()
+	}
+
+	func setAutomaticThemeThreshold(_ threshold: Int) {
+		let clampedThreshold = min(max(threshold, 0), 100)
+		guard settings.theme.automaticThreshold != clampedThreshold else { return }
+		settings.theme.automaticThreshold = clampedThreshold
+		persistSettings()
+		if settings.theme.isAutomaticSwitchingEnabled {
+			synchronizeTheme(using: sourceBrightness)
+		}
+		showIdleStatus()
+	}
+
+	func setThemeShortcut(_ shortcut: ThemeShortcut?, for action: ThemeShortcutAction) {
+		let previousSettings = settings.theme
+		settings.theme.setShortcut(shortcut, for: action)
+		guard settings.theme != previousSettings else { return }
+		persistSettings()
+		onThemeShortcutsChanged?()
+		showIdleStatus()
+	}
+
+	func setShortcutWarning(_ warning: String?) {
+		shortcutWarning = warning
+		showIdleStatus()
+	}
+
     func synchronizeFromBuiltInDisplay() {
         guard previewTarget == nil else { return }
 
         do {
             let source = try displayReader.read()
             sourceBrightness = source
+			synchronizeTheme(using: source)
             let profiles = activeProfiles
             guard !profiles.isEmpty else {
                 showIdleStatus()
@@ -203,7 +288,42 @@ final class BrightnessAppModel: ObservableObject {
     }
 
     private func showIdleStatus() {
-        status = settingsWarning.map(Status.error) ?? .idle
+		status = settingsWarning.map(Status.error) ?? appearanceWarning.map(Status.error) ?? shortcutWarning.map(Status.error) ?? .idle
+	}
+
+	private func refreshCurrentTheme() {
+		do {
+			currentTheme = try appearanceController.currentTheme()
+			appearanceWarning = nil
+			showIdleStatus()
+		} catch {
+			setAppearanceWarning(error)
+		}
+	}
+
+	private func synchronizeTheme(using brightness: Double?) {
+		guard settings.theme.isAutomaticSwitchingEnabled, let brightness else { return }
+
+		do {
+			currentTheme = try appearanceController.currentTheme()
+			let targetTheme = settings.theme.automaticTheme(for: brightness, currentTheme: currentTheme)
+			guard targetTheme != currentTheme else {
+				appearanceWarning = nil
+				showIdleStatus()
+				return
+			}
+			try appearanceController.setTheme(targetTheme)
+			currentTheme = targetTheme
+			appearanceWarning = nil
+			showIdleStatus()
+		} catch {
+			setAppearanceWarning(error)
+		}
+	}
+
+	private func setAppearanceWarning(_ error: Error) {
+		appearanceWarning = "Appearance: \(error.localizedDescription)"
+		showIdleStatus()
     }
 
     private func probeDisplays(_ candidates: [DDCDisplay]) -> DDCProbeResult {

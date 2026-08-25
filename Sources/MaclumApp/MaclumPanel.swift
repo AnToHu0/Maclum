@@ -36,9 +36,13 @@ struct MaclumPanel: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Low / Mid / High correspond to Mac brightness 0% / 50% / 100%.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+			Text("Low / Mid / High correspond to Mac brightness 0% / 50% / 100%.")
+				.font(.caption)
+				.foregroundStyle(.secondary)
+
+			Text("For reliable syncing, turn off the monitor’s own automatic brightness.")
+				.font(.caption)
+				.foregroundStyle(.secondary)
 
             if model.m1ddcIsInstalled {
                 displayProfiles
@@ -46,15 +50,13 @@ struct MaclumPanel: View {
                 missingDependency
             }
 
-            statusMessage
+			themeControls
 
-            Divider()
+			statusMessage
 
-            Text("For reliable syncing, turn off the monitor’s own automatic brightness.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+			Divider()
 
-            HStack {
+			HStack {
                 Button("Refresh displays") {
                     model.refreshDisplays()
                 }
@@ -129,6 +131,62 @@ struct MaclumPanel: View {
         }
     }
 
+	private var themeControls: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			HStack {
+				Label("Theme", systemImage: "circle.lefthalf.filled")
+					.font(.headline)
+			}
+
+			ThemeModeRow(
+				isOn: Binding(
+					get: { model.currentTheme == .dark },
+					set: { model.setTheme($0 ? .dark : .light) }
+				),
+				isDark: model.currentTheme == .dark,
+				shortcut: model.manualThemeShortcut,
+				shortcutLabel: "Toggle theme hotkey",
+				onShortcutChanged: { model.setThemeShortcut($0, for: .manualToggle) }
+			)
+			.help("A manual change turns off automatic switching.")
+
+			ThemeToggleRow(
+				title: "Automatic",
+				isOn: Binding(
+					get: { model.isAutomaticThemeSwitchingEnabled },
+					set: { model.setAutomaticThemeSwitchingEnabled($0) }
+				),
+				shortcut: model.resumeAutomaticThemeShortcut,
+				shortcutLabel: "Resume automatic theme hotkey",
+				onShortcutChanged: { model.setThemeShortcut($0, for: .resumeAutomatic) }
+			)
+
+			HStack(spacing: 12) {
+				Text("Threshold")
+
+				ZStack(alignment: .trailing) {
+					ThemeThresholdTrack(
+						value: model.automaticThemeThreshold,
+						onChanged: model.setAutomaticThemeThreshold
+					)
+					.frame(maxWidth: .infinity)
+					.padding(.trailing, ThemeControlsLayout.thresholdTrackTrailingInset)
+
+					Text("\(model.automaticThemeThreshold)%")
+						.font(.caption.monospacedDigit())
+						.foregroundStyle(.secondary)
+						.frame(width: ThemeControlsLayout.thresholdValueColumnWidth, alignment: .center)
+				}
+				.frame(maxWidth: .infinity)
+				.frame(height: 24)
+			}
+			.frame(maxWidth: .infinity)
+		}
+		.frame(maxWidth: .infinity)
+		.padding(12)
+		.background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+	}
+
     private var macBrightnessLabel: String {
         guard let sourceBrightness = model.sourceBrightness else { return "Mac brightness unavailable" }
         return "Mac: \(Int((sourceBrightness * 100).rounded()))%"
@@ -154,6 +212,69 @@ private enum PanelContentHeightKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
     }
+}
+
+private enum ThemeControlsLayout {
+	static let trailingColumnWidth: CGFloat = 76
+	static let thresholdValueColumnWidth: CGFloat = 36
+	static let thresholdValueWidth: CGFloat = 28
+	static let thresholdTrackToValueSpacing: CGFloat = 12
+	static let thresholdTrackTrailingInset = (thresholdValueColumnWidth + thresholdValueWidth) / 2 + thresholdTrackToValueSpacing
+}
+
+private struct ThemeToggleRow: View {
+	let title: String
+	let isOn: Binding<Bool>
+	let shortcut: ThemeShortcut?
+	let shortcutLabel: String
+	let onShortcutChanged: (ThemeShortcut?) -> Void
+
+	var body: some View {
+		HStack(spacing: 12) {
+			Text(title)
+			Toggle(title, isOn: isOn)
+				.labelsHidden()
+				.toggleStyle(.switch)
+			Spacer()
+			ThemeShortcutRecorder(
+				label: shortcutLabel,
+				shortcut: shortcut,
+				onShortcutChanged: onShortcutChanged
+			)
+			.frame(width: ThemeControlsLayout.trailingColumnWidth, alignment: .trailing)
+		}
+	}
+}
+
+private struct ThemeModeRow: View {
+	let isOn: Binding<Bool>
+	let isDark: Bool
+	let shortcut: ThemeShortcut?
+	let shortcutLabel: String
+	let onShortcutChanged: (ThemeShortcut?) -> Void
+
+	var body: some View {
+		HStack(spacing: 10) {
+			Text("Light")
+				.foregroundStyle(isDark ? .secondary : .primary)
+
+			Toggle("Theme", isOn: isOn)
+				.labelsHidden()
+				.toggleStyle(.switch)
+
+			Text("Dark")
+				.foregroundStyle(isDark ? .primary : .secondary)
+
+			Spacer()
+
+			ThemeShortcutRecorder(
+				label: shortcutLabel,
+				shortcut: shortcut,
+				onShortcutChanged: onShortcutChanged
+			)
+			.frame(width: ThemeControlsLayout.trailingColumnWidth, alignment: .trailing)
+		}
+	}
 }
 
 private struct DisplayProfileRow: View {
@@ -218,12 +339,13 @@ private struct CurveTrack: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let width = max(geometry.size.width - 28, 1)
+			let thumbRadius: CGFloat = 9
+			let width = max(geometry.size.width - (thumbRadius * 2), 1)
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(.quaternary)
                     .frame(height: 6)
-                    .padding(.horizontal, 14)
+					.padding(.horizontal, thumbRadius)
 
                 ForEach(CurveAnchor.allCases, id: \.self) { anchor in
                     CurveThumb(
@@ -233,7 +355,7 @@ private struct CurveTrack: View {
                             onPreviewBegan(anchor)
                         },
                         onDrag: { location in
-                            let normalized = ((location - 14) / width).clamped(to: 0...1)
+							let normalized = ((location - thumbRadius) / width).clamped(to: 0...1)
                             onPreviewChanged(anchor, Int((normalized * 100).rounded()))
                         },
                         onDragEnded: {
@@ -245,7 +367,7 @@ private struct CurveTrack: View {
                             onPreviewEnded(anchor)
                         }
                     )
-                    .position(x: 14 + (width * CGFloat(value(for: anchor)) / 100), y: geometry.size.height / 2)
+					.position(x: thumbRadius + (width * CGFloat(value(for: anchor)) / 100), y: geometry.size.height / 2)
                 }
             }
         }
@@ -261,6 +383,47 @@ private struct CurveTrack: View {
         case .high: curve.high
         }
     }
+}
+
+private struct ThemeThresholdTrack: View {
+	let value: Int
+	let onChanged: (Int) -> Void
+
+	var body: some View {
+		GeometryReader { geometry in
+			let thumbRadius: CGFloat = 9
+			let trackWidth = max(geometry.size.width - (thumbRadius * 2), 1)
+			ZStack(alignment: .leading) {
+				Capsule()
+					.fill(.quaternary)
+					.frame(maxWidth: .infinity)
+					.frame(height: 6)
+
+				Circle()
+					.fill(.blue)
+					.frame(width: thumbRadius * 2, height: thumbRadius * 2)
+					.overlay(Circle().stroke(.background, lineWidth: 2))
+					.position(
+						x: thumbRadius + (trackWidth * CGFloat(value) / 100),
+						y: geometry.size.height / 2
+					)
+			}
+			.frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
+			.contentShape(Rectangle())
+			.gesture(
+				DragGesture(minimumDistance: 0)
+					.onChanged { gesture in
+						let normalized = ((gesture.location.x - thumbRadius) / trackWidth).clamped(to: 0...1)
+						onChanged(Int((normalized * 100).rounded()))
+					}
+			)
+		}
+		.accessibilityLabel("Automatic theme brightness threshold")
+		.accessibilityValue("\(value) percent")
+		.accessibilityAdjustableAction { direction in
+			onChanged(value + (direction == .increment ? 1 : -1))
+		}
+	}
 }
 
 private struct CurveThumb: View {
