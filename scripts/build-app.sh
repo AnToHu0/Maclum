@@ -69,6 +69,7 @@ plutil -insert LSMinimumSystemVersion -string "15.0" "$CONTENTS/Info.plist"
 plutil -insert LSMultipleInstancesProhibited -bool true "$CONTENTS/Info.plist"
 plutil -insert LSUIElement -bool true "$CONTENTS/Info.plist"
 plutil -insert NSHighResolutionCapable -bool true "$CONTENTS/Info.plist"
+plutil -insert NSAppleEventsUsageDescription -string "Maclum changes the system appearance when you use its theme controls." "$CONTENTS/Info.plist"
 
 codesign --force --deep --sign - "$APP_BUNDLE"
 mkdir -p "$OUTPUT_ROOT"

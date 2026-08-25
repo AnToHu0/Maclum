@@ -10,6 +10,7 @@ INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
 file "$APP_BUNDLE/Contents/MacOS/Maclum" | grep -q 'arm64'
 test "$(plutil -extract CFBundleShortVersionString raw "$INFO_PLIST")" = "1.0.0"
 test "$(plutil -extract CFBundleVersion raw "$INFO_PLIST")" = "1"
+test "$(plutil -extract NSAppleEventsUsageDescription raw "$INFO_PLIST")" = "Maclum changes the system appearance when you use its theme controls."
 
 MACLUM_VERSION="v9.8.7" MACLUM_BUILD_NUMBER="42" "$PROJECT_ROOT/scripts/build-app.sh"
 

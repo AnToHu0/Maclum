@@ -5,6 +5,25 @@ import SwiftUI
 @MainActor
 private enum AppCompositionRoot {
     static let model = BrightnessAppModel()
+	static let themeHotKeyMonitor = ThemeHotKeyMonitor()
+
+	static func configureThemeHotKeys() {
+		let warning = themeHotKeyMonitor.configure(
+			manualToggle: model.manualThemeShortcut,
+			resumeAutomatic: model.resumeAutomaticThemeShortcut,
+			onManualToggle: {
+				Task { @MainActor in
+					model.performThemeShortcut(.manualToggle)
+				}
+			},
+			onResumeAutomatic: {
+				Task { @MainActor in
+					model.performThemeShortcut(.resumeAutomatic)
+				}
+			}
+		)
+		model.setShortcutWarning(warning)
+	}
 }
 
 @main
@@ -64,11 +83,17 @@ private enum MaclumStatusIcon {
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
+		let activationPolicy: NSApplication.ActivationPolicy = .accessory
+		NSApplication.shared.setActivationPolicy(activationPolicy)
+		AppCompositionRoot.model.onThemeShortcutsChanged = {
+			AppCompositionRoot.configureThemeHotKeys()
+		}
         AppCompositionRoot.model.start()
+		AppCompositionRoot.configureThemeHotKeys()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         AppCompositionRoot.model.stop()
+		AppCompositionRoot.themeHotKeyMonitor.stop()
     }
 }

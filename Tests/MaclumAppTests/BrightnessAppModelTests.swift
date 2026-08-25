@@ -96,6 +96,148 @@ final class BrightnessAppModelTests: XCTestCase {
         XCTAssertEqual(ddc.readRequests.filter { $0 == "display-b" }.count, 2)
     }
 
+	func testManualThemeSelectionDisablesAutomationAndAppliesTheSelectedTheme() throws {
+		let settingsStore = try makeSettingsStore()
+		try settingsStore.save(MaclumSettings(theme: ThemeSettings(isAutomaticSwitchingEnabled: true)))
+		let appearance = FakeSystemAppearanceController(theme: .light)
+		let model = BrightnessAppModel(
+			displayReader: FakeBrightnessReader(value: 0.5),
+			ddcClient: FakeDDCClient(displays: []),
+			settingsStore: settingsStore,
+			appearanceController: appearance
+		)
+		defer { model.stop() }
+
+		model.start()
+		appearance.resetAppliedThemes()
+
+		model.setTheme(.dark)
+
+		XCTAssertFalse(model.settings.theme.isAutomaticSwitchingEnabled)
+		XCTAssertEqual(model.currentTheme, .dark)
+		XCTAssertEqual(appearance.appliedThemes, [.dark])
+		XCTAssertEqual(try settingsStore.load().theme.isAutomaticSwitchingEnabled, false)
+	}
+
+	func testManualThemeShortcutTogglesTheThemeAndDisablesAutomation() throws {
+		let settingsStore = try makeSettingsStore()
+		try settingsStore.save(MaclumSettings(theme: ThemeSettings(isAutomaticSwitchingEnabled: true)))
+		let appearance = FakeSystemAppearanceController(theme: .light)
+		let model = BrightnessAppModel(
+			displayReader: FakeBrightnessReader(value: 0.5),
+			ddcClient: FakeDDCClient(displays: []),
+			settingsStore: settingsStore,
+			appearanceController: appearance
+		)
+		defer { model.stop() }
+
+		model.start()
+		appearance.resetAppliedThemes()
+
+		model.performThemeShortcut(.manualToggle)
+
+		XCTAssertFalse(model.settings.theme.isAutomaticSwitchingEnabled)
+		XCTAssertEqual(model.currentTheme, .dark)
+		XCTAssertEqual(appearance.appliedThemes, [.dark])
+	}
+
+	func testManualThemeSelectionCanApplyLightAndDisablesAutomation() throws {
+		let settingsStore = try makeSettingsStore()
+		try settingsStore.save(MaclumSettings(theme: ThemeSettings(isAutomaticSwitchingEnabled: true)))
+		let appearance = FakeSystemAppearanceController(theme: .dark)
+		let model = BrightnessAppModel(
+			displayReader: FakeBrightnessReader(value: 0.5),
+			ddcClient: FakeDDCClient(displays: []),
+			settingsStore: settingsStore,
+			appearanceController: appearance
+		)
+		defer { model.stop() }
+
+		model.start()
+		appearance.resetAppliedThemes()
+
+		model.setTheme(.light)
+
+		XCTAssertFalse(model.settings.theme.isAutomaticSwitchingEnabled)
+		XCTAssertEqual(model.currentTheme, .light)
+		XCTAssertEqual(appearance.appliedThemes, [.light])
+	}
+
+	func testResumeAutomaticShortcutEnablesAutomationAndImmediatelyAppliesCurrentBrightnessRule() throws {
+		let settingsStore = try makeSettingsStore()
+		let appearance = FakeSystemAppearanceController(theme: .light)
+		let model = BrightnessAppModel(
+			displayReader: FakeBrightnessReader(value: 0.2),
+			ddcClient: FakeDDCClient(displays: []),
+			settingsStore: settingsStore,
+			appearanceController: appearance
+		)
+		defer { model.stop() }
+
+		model.start()
+		model.performThemeShortcut(.resumeAutomatic)
+
+		XCTAssertTrue(model.settings.theme.isAutomaticSwitchingEnabled)
+		XCTAssertEqual(model.currentTheme, .dark)
+		XCTAssertEqual(appearance.appliedThemes, [.dark])
+	}
+
+	func testAppearanceErrorDoesNotPreventBrightnessSynchronization() throws {
+		let settingsStore = try makeSettingsStore()
+		try settingsStore.save(MaclumSettings(theme: ThemeSettings(isAutomaticSwitchingEnabled: true)))
+		let ddc = FakeDDCClient(
+			displays: [DDCDisplay(id: "display-a", name: "Display A")],
+			luminances: ["display-a": 50]
+		)
+		let appearance = FakeSystemAppearanceController(theme: .light, setError: FakeAppearanceError.denied)
+		let model = BrightnessAppModel(
+			displayReader: FakeBrightnessReader(value: 0.2),
+			ddcClient: ddc,
+			settingsStore: settingsStore,
+			appearanceController: appearance
+		)
+		defer { model.stop() }
+
+		model.start()
+
+		XCTAssertEqual(
+			ddc.setRequests,
+			[FakeDDCClient.SetRequest(brightness: 20, displayID: "display-a")]
+		)
+		guard case let .error(message) = model.status else {
+			return XCTFail("Expected a theme status error")
+		}
+		XCTAssertTrue(message.contains("Appearance"))
+	}
+
+	func testAppearanceReadErrorDoesNotPreventBrightnessSynchronization() throws {
+		let settingsStore = try makeSettingsStore()
+		try settingsStore.save(MaclumSettings(theme: ThemeSettings(isAutomaticSwitchingEnabled: true)))
+		let ddc = FakeDDCClient(
+			displays: [DDCDisplay(id: "display-a", name: "Display A")],
+			luminances: ["display-a": 50]
+		)
+		let appearance = FakeSystemAppearanceController(theme: .light, currentError: FakeAppearanceError.denied)
+		let model = BrightnessAppModel(
+			displayReader: FakeBrightnessReader(value: 0.2),
+			ddcClient: ddc,
+			settingsStore: settingsStore,
+			appearanceController: appearance
+		)
+		defer { model.stop() }
+
+		model.start()
+
+		XCTAssertEqual(
+			ddc.setRequests,
+			[FakeDDCClient.SetRequest(brightness: 20, displayID: "display-a")]
+		)
+		guard case let .error(message) = model.status else {
+			return XCTFail("Expected a theme status error")
+		}
+		XCTAssertTrue(message.contains("Appearance"))
+	}
+
     private func makeSettingsStore() throws -> SettingsStore {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -116,11 +258,50 @@ private final class FakeBrightnessReader: BuiltInBrightnessReading {
     }
 }
 
+private final class FakeSystemAppearanceController: SystemAppearanceControlling {
+	private(set) var theme: SystemTheme
+	private(set) var appliedThemes: [SystemTheme] = []
+
+	private let setError: Error?
+	private let currentError: Error?
+
+	init(theme: SystemTheme, setError: Error? = nil, currentError: Error? = nil) {
+		self.theme = theme
+		self.setError = setError
+		self.currentError = currentError
+	}
+
+	func currentTheme() throws -> SystemTheme {
+		if let currentError {
+			throw currentError
+		}
+		return theme
+	}
+
+	func setTheme(_ theme: SystemTheme) throws {
+		if let setError {
+			throw setError
+		}
+		self.theme = theme
+		appliedThemes.append(theme)
+	}
+
+	func resetAppliedThemes() {
+		appliedThemes.removeAll()
+	}
+}
+
 private final class FakeDDCClient: DDCControlling {
+	struct SetRequest: Equatable {
+		let brightness: Int
+		let displayID: String?
+	}
+
     let availableDisplays: [DDCDisplay]
     var luminances: [String: Int]
     var failingReadDisplayIDs: Set<String>
     private(set) var readRequests: [String] = []
+	private(set) var setRequests: [SetRequest] = []
 
     init(
         displays: [DDCDisplay],
@@ -150,9 +331,17 @@ private final class FakeDDCClient: DDCControlling {
         readRequests.removeAll()
     }
 
-    func setLuminance(_ brightness: Int, displayID: String?) throws {}
+	func setLuminance(_ brightness: Int, displayID: String?) throws {
+		setRequests.append(SetRequest(brightness: brightness, displayID: displayID))
+	}
 }
 
 private enum FakeDDCError: Error {
     case readFailed
+}
+
+private enum FakeAppearanceError: LocalizedError {
+	case denied
+
+	var errorDescription: String? { "Automation permission denied" }
 }

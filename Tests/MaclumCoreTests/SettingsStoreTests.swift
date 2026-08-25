@@ -30,10 +30,24 @@ final class SettingsStoreTests: XCTestCase {
                 name: "Studio Display",
                 curve: try XCTUnwrap(BrightnessCurve(low: 20, mid: 50, high: 80))
             ),
-        ])
+		], theme: ThemeSettings(
+			isAutomaticSwitchingEnabled: true,
+			automaticThreshold: 42,
+			manualToggleShortcut: ThemeShortcut(keyCode: 2, modifiers: [.command, .option]),
+			resumeAutomaticShortcut: ThemeShortcut(keyCode: 0, modifiers: [.command, .control])
+		))
 
         try store.save(expected)
 
         XCTAssertEqual(try store.load(), expected)
     }
+
+	func testDecodingExistingSettingsUsesManualThemeDefaults() throws {
+		let settings = try JSONDecoder().decode(
+			MaclumSettings.self,
+			from: #"{"profiles":[]}"#.data(using: .utf8)!
+		)
+
+		XCTAssertEqual(settings.theme, ThemeSettings())
+	}
 }

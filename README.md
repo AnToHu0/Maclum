@@ -38,6 +38,19 @@ each compatible monitor gets a card with its reported brightness and curve.
 - Profiles for previously connected monitors are retained. Use **Show
   disconnected displays** to review or delete them.
 
+## Theme controls
+
+Maclum can also switch the macOS appearance between Light and Dark.
+
+- Set a hotkey beside **Light / Dark** to toggle the theme manually. A manual
+  switch turns off automatic switching.
+- Enable **Automatic** to switch from the MacBook brightness at the selected
+  threshold. Its hotkey re-enables automatic switching and applies the current
+  brightness rule immediately.
+- macOS may ask for permission to automate **System Events** the first time
+  you change the theme. Grant it in **System Settings → Privacy & Security →
+  Automation** if you want to use the theme controls.
+
 Settings are stored locally at
 `~/Library/Application Support/Maclum/settings.json`.
 
